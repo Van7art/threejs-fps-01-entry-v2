@@ -1,46 +1,35 @@
-// Seeded random numbers for Sunscorch Yard.
-//
-// One seeded generator drives the whole match — bot choices, routes, aim
-// error — so a match started with the same seed plays out the same way.
-// The generator is a small mulberry32 PRNG; nothing here touches
-// Math.random, so screenshots staged with ?seed=1 are reproducible.
-
-export function mulberry32(seed) {
-  let state = seed >>> 0;
-  return function next() {
-    state |= 0;
-    state = (state + 0x6d2b79f5) | 0;
-    let t = Math.imul(state ^ (state >>> 15), 1 | state);
-    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+// Seeded random stream used by the whole match so a seed replays the same yard.
+// Mulberry32: small, fast, and deterministic across browsers.
+export function makeStream(seed) {
+  let s = (seed >>> 0) || 1;
+  function next() {
+    s = (s + 0x6d2b79f5) >>> 0;
+    let t = s;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
     return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  }
+  return {
+    next,
+    range(lo, hi) { return lo + (hi - lo) * next(); },
+    pick(list) { return list[Math.floor(next() * list.length) % list.length]; },
+    int(lo, hi) { return lo + Math.floor(next() * (hi - lo + 1)); },
+    chance(p) { return next() < p; },
+    // Box-Muller pair, cached second value so calls stay cheap.
+    gauss() {
+      const u = Math.max(next(), 1e-9);
+      const v = next();
+      return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v);
+    },
   };
 }
 
-export function makeRng(seed) {
-  const next = mulberry32(seed);
-  return {
-    next,
-    // Uniform float in [min, max).
-    range(min, max) {
-      return min + (max - min) * next();
-    },
-    // Uniform integer in [min, max].
-    int(min, max) {
-      return Math.floor(min + (max - min + 1) * next());
-    },
-    // A random element of a non-empty list.
-    pick(list) {
-      return list[Math.floor(next() * list.length)];
-    },
-    // True with probability p.
-    chance(p) {
-      return next() < p;
-    },
-    // Roughly normal in [-1, 1]: the average of three uniforms, rescaled.
-    // Used for spread and aim error, where a bell shape reads better than
-    // a flat one.
-    normal() {
-      return (next() + next() + next() - 1.5) / 1.5;
-    },
-  };
+// Tiny hash of a string into a 32-bit seed, for named seeds.
+export function hashSeed(text) {
+  let h = 2166136261 >>> 0;
+  for (let i = 0; i < text.length; i++) {
+    h ^= text.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  return h >>> 0;
 }
